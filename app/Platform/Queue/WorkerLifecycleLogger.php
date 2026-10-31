@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Platform\Queue;
 
 use BackedEnum;
-use Illuminate\Contracts\Queue\Job;
 use Illuminate\Events\Dispatcher;
 use Illuminate\Queue\Events\JobTimedOut;
 use Illuminate\Queue\Events\WorkerInterrupted;
@@ -73,7 +72,7 @@ final class WorkerLifecycleLogger
     {
         $this->logger->error('worker.job.timed_out', [
             'connection' => $event->connectionName,
-            'job' => $event->job instanceof Job ? $event->job->resolveName() : null,
+            'job' => $event->job->resolveName(),
             'timeout' => $event->timeout,
         ]);
     }

@@ -196,8 +196,12 @@ final class CacheMetricsStore implements MetricsStore
     {
         $index = $this->cache->get($this->prefix.'index');
 
+        if (! is_array($index)) {
+            return [];
+        }
+
         /** @var array<string, Descriptor> $index */
-        return is_array($index) ? $index : [];
+        return $index;
     }
 
     /**

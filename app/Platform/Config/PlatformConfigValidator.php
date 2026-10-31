@@ -95,10 +95,10 @@ final class PlatformConfigValidator
             'boolean' => ':attribute must be true or false.',
         ];
 
-        /** @var Validator $validator */
         // Display attributes as the environment variable names they come from.
         $attributes = array_combine(array_keys($data), array_keys($data));
 
+        /** @var Validator $validator */
         $validator = $this->validation->make($data, $rules, $messages, $attributes);
 
         $validator->after(function (Validator $validator) use ($data): void {

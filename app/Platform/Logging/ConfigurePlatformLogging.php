@@ -6,7 +6,6 @@ namespace App\Platform\Logging;
 
 use Illuminate\Contracts\Config\Repository as Config;
 use Illuminate\Log\Logger;
-use InvalidArgumentException;
 use Monolog\Handler\AbstractHandler;
 use Monolog\Handler\FormattableHandlerInterface;
 use Monolog\Level;
@@ -48,12 +47,16 @@ final class ConfigurePlatformLogging
 
     private function level(): Level
     {
-        try {
-            return Monolog::toMonologLevel($this->string('platform.log_level', 'info'));
-        } catch (InvalidArgumentException) {
-            // Unreachable once PlatformConfigValidator has run; keep logging usable while it reports.
-            return Level::Info;
+        $name = strtolower($this->string('platform.log_level', 'info'));
+
+        foreach (Level::cases() as $level) {
+            if (strtolower($level->getName()) === $name) {
+                return $level;
+            }
         }
+
+        // Unreachable once PlatformConfigValidator has run; keep logging usable while it reports.
+        return Level::Info;
     }
 
     private function string(string $key, string $default): string
