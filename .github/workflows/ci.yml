@@ -23,15 +23,9 @@ jobs:
           coverage: none
           tools: composer:v2
 
-      # Until composer.lock is committed this resolves fresh dependencies (`composer update`).
+      # Installs exactly what composer.lock pins (resolved on PHP 8.3).
       - name: Install dependencies
         run: composer install --no-interaction --no-progress --prefer-dist
-
-      - name: Upload resolved composer.lock
-        uses: actions/upload-artifact@v4
-        with:
-          name: composer-lock
-          path: composer.lock
 
       # Same as `make setup`: Larastan boots the app, and with no .env APP_ENV defaults to
       # production, where config validation (correctly) requires APP_KEY.
@@ -48,13 +42,3 @@ jobs:
 
       - name: Tests (Pest, parallel)
         run: php artisan test --parallel
-
-      # TEMPORARY: the automation sandbox can't download artifacts, so print the resolved lock
-      # (gzip+base64) to the log so it can be committed. Removed together with the lock commit.
-      - name: Print resolved composer.lock
-        if: always()
-        run: |
-          sha256sum composer.lock
-          echo "-----BEGIN COMPOSER LOCK-----"
-          gzip -9c composer.lock | base64 -w 100
-          echo "-----END COMPOSER LOCK-----"
