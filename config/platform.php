@@ -47,11 +47,19 @@ return [
     ],
 
     /*
-    | Graceful shutdown deadline, in seconds. Used as the queue worker's per-job
-    | `--timeout` (the longest the worker waits for the in-flight job after SIGTERM)
-    | and as the PHP-FPM `process_control_timeout` in deployments/.
+    | Graceful shutdown deadline, in seconds: how long a process manager waits
+    | after SIGTERM/SIGQUIT before killing a process (supervisor `stopwaitsecs`,
+    | PHP-FPM `process_control_timeout`, nginx `worker_shutdown_timeout`; see
+    | deployments/). Must be greater than queue.job_timeout so the worker can
+    | always finish its in-flight job.
     */
     'shutdown_timeout' => env('SHUTDOWN_TIMEOUT', 30),
+
+    'queue' => [
+        // Maximum runtime of a single queued job, in seconds (`queue:work --timeout`).
+        // A job exceeding it is killed and the worker exits non-zero.
+        'job_timeout' => env('QUEUE_JOB_TIMEOUT', 25),
+    ],
 
     'metrics' => [
         'enabled' => env('METRICS_ENABLED', true),
@@ -63,6 +71,11 @@ return [
         // Laravel cache store holding metric samples between requests (PHP shares no memory
         // between requests). "file" works locally; use "redis" in staging/production.
         'store' => env('METRICS_STORE', 'file'),
+
+        // Namespace for this instance's samples in a shared store, so pods sharing one Redis
+        // never see each other's samples. Empty = the machine hostname, resolved at runtime
+        // (not at `config:cache` time).
+        'instance' => env('METRICS_INSTANCE'),
 
         // Histogram buckets (seconds) for http_request_duration_seconds.
         'duration_buckets' => [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],

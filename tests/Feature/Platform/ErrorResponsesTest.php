@@ -1,5 +1,6 @@
 <?php
 
+use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Route;
@@ -10,6 +11,7 @@ beforeEach(function () {
     Route::get('/api/v1/_test/conflict', fn () => throw new ConflictException);
     Route::post('/api/v1/_test/validate', fn (Request $request) => $request->validate(['email' => ['required', 'email']]));
     Route::get('/api/v1/_test/ok', fn () => ['ok' => true]);
+    Route::get('/api/v1/_test/own-response', fn () => throw new HttpResponseException(response('teapot', 418)));
 });
 
 it('returns 404 Problem Details for unknown routes', function () {
@@ -96,4 +98,13 @@ it('renders module-specific error codes', function () {
     $this->get('/api/v1/_test/conflict')
         ->assertStatus(409)
         ->assertJson(['code' => 'example.already_exists', 'status' => 409]);
+});
+
+it('returns the response carried by an HttpResponseException unchanged', function () {
+    $response = $this->get('/api/v1/_test/own-response');
+
+    $response->assertStatus(418);
+
+    expect($response->getContent())->toBe('teapot')
+        ->and($response->headers->get('Content-Type'))->not->toBe('application/problem+json');
 });

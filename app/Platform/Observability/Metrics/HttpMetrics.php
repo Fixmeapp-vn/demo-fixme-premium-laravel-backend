@@ -50,12 +50,4 @@ final class HttpMetrics
             'route' => $route,
         ], $durationSeconds, $this->durationBuckets);
     }
-
-    /**
-     * @return list<float|int>
-     */
-    public function durationBuckets(): array
-    {
-        return $this->durationBuckets;
-    }
 }

@@ -41,9 +41,11 @@ final class PlatformServiceProvider extends ServiceProvider
             /** @var Config $config */
             $config = $app->make(Config::class);
             $store = $config->get('platform.metrics.store');
+            $instance = $config->get('platform.metrics.instance');
 
             return new CacheMetricsStore(
                 $app->make(CacheFactory::class)->store(is_string($store) ? $store : null),
+                is_string($instance) && $instance !== '' ? $instance : (gethostname() ?: 'local'),
             );
         });
 

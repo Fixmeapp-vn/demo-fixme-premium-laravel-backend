@@ -1,6 +1,6 @@
 <?php
 
-use App\Platform\Logging\PlatformJsonFormatter;
+use App\Platform\Logging\ConfigurePlatformLogging;
 use App\Platform\Logging\RedactSensitiveData;
 use Monolog\Handler\NullHandler;
 use Monolog\Handler\StreamHandler;
@@ -27,18 +27,16 @@ return [
 
     'channels' => [
 
+        // Level, formatter (PlatformJsonFormatter), service name and environment are applied by
+        // ConfigurePlatformLogging from the validated config/platform.php values, so
+        // LOG_LEVEL / SERVICE_NAME / APP_ENV are read in one place only.
         'json' => [
             'driver' => 'monolog',
-            'level' => env('LOG_LEVEL', 'info'),
             'handler' => StreamHandler::class,
             'handler_with' => [
                 'stream' => env('LOG_STREAM', 'php://stderr'),
             ],
-            'formatter' => PlatformJsonFormatter::class,
-            'formatter_with' => [
-                'service' => env('SERVICE_NAME', 'fixme-premium-backend'),
-                'environment' => env('APP_ENV', 'production'),
-            ],
+            'tap' => [ConfigurePlatformLogging::class],
             'processors' => [RedactSensitiveData::class],
         ],
 

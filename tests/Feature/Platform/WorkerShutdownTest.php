@@ -35,8 +35,8 @@ it('starts, handles SIGTERM gracefully and exits 0', function (int $signal, stri
     'SIGINT' => [SIGINT, 'SIGINT'],
 ])->skip(! extension_loaded('pcntl'), 'ext-pcntl is required for graceful worker shutdown');
 
-it('passes SHUTDOWN_TIMEOUT to queue:work as the job timeout', function () {
-    config(['platform.shutdown_timeout' => 17]);
+it('passes QUEUE_JOB_TIMEOUT to queue:work as the per-job timeout', function () {
+    config(['platform.queue.job_timeout' => 17, 'platform.shutdown_timeout' => 30]);
 
     $worker = Mockery::mock(Worker::class);
     $worker->shouldReceive('setName')->andReturnSelf();

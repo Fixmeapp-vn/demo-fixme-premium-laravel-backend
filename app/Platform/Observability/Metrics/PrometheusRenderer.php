@@ -15,7 +15,6 @@ final class PrometheusRenderer
     public function __construct(
         private readonly MetricsStore $store,
         private readonly RuntimeMetrics $runtime,
-        private readonly HttpMetrics $http,
     ) {}
 
     public function render(): string
@@ -37,11 +36,9 @@ final class PrometheusRenderer
             $lines[] = '# TYPE '.$name.' histogram';
 
             foreach ($series as $sample) {
-                // Stored bucket counts are already cumulative (an observation
-                // increments every bucket whose upper bound it does not exceed).
-                foreach ($this->http->durationBuckets() as $bound) {
-                    $le = CacheMetricsStore::formatBound($bound);
-                    $lines[] = $name.'_bucket'.self::labels($sample['labels'] + ['le' => $le]).' '.($sample['buckets'][$le] ?? 0);
+                // Bucket counts from the store are already cumulative.
+                foreach ($sample['buckets'] as $le => $count) {
+                    $lines[] = $name.'_bucket'.self::labels($sample['labels'] + ['le' => (string) $le]).' '.$count;
                 }
 
                 $lines[] = $name.'_bucket'.self::labels($sample['labels'] + ['le' => '+Inf']).' '.$sample['count'];

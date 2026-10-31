@@ -20,11 +20,14 @@ to `sync`, and cache/metrics to the `file` store.
 ## Getting started
 
 ```bash
-make setup          # composer install, copy .env.example to .env, generate APP_KEY
+make setup          # copy .env.example to .env (if missing), composer install, php artisan key:generate
 make run-api        # API on HTTP_ADDR (default http://127.0.0.1:8000)
 make run-metrics    # internal metrics listener on METRICS_ADDR (default http://127.0.0.1:9100/metrics)
 make run-worker     # queue worker
 ```
+
+`composer install` alone does not create `.env` (the `post-root-package-install` hook only runs on
+`composer create-project`), so use `make setup` or copy `.env.example` and run `php artisan key:generate`.
 
 Quick check:
 
@@ -67,10 +70,12 @@ are listed in [`.env.example`](.env.example).
 | `HTTP_REQUEST_TIMEOUT` | `30` | Max PHP execution time per request (1–300 s) |
 | `HTTP_READ_HEADER_TIMEOUT` | `10` | Web-server header read timeout (1–120 s) |
 | `HTTP_IDLE_TIMEOUT` | `60` | Web-server keep-alive idle timeout (1–900 s) |
-| `SHUTDOWN_TIMEOUT` | `30` | Graceful shutdown deadline (1–300 s) |
+| `QUEUE_JOB_TIMEOUT` | `25` | Max runtime of one queued job, `queue:work --timeout` (1–299 s) |
+| `SHUTDOWN_TIMEOUT` | `30` | Graceful shutdown grace period (supervisor `stopwaitsecs`, FPM `process_control_timeout`); must be greater than `QUEUE_JOB_TIMEOUT` (1–300 s) |
 | `METRICS_ENABLED` | `true` | Serve `/metrics` and record HTTP metrics |
 | `METRICS_ADDR` | `127.0.0.1:9100` | Internal metrics listener; must use a different port than `HTTP_ADDR` |
 | `METRICS_STORE` | `file` | Cache store holding metric samples (`redis` recommended outside development) |
+| `METRICS_INSTANCE` | hostname | Namespace for this instance's samples in a shared store |
 | `LOG_LEVEL` | `info` | `debug` … `emergency` |
 
 **Environments.** Laravel itself uses `local` and `testing`; `config/app.php`
@@ -94,7 +99,7 @@ Invalid application configuration. Fix the following and restart:
 
 ### HTTP server
 - Laravel HTTP kernel. Locally `artisan serve` (via `platform:serve`); in deployed environments PHP-FPM behind nginx — reference configs in [`deployments/`](deployments/README.md).
-- Timeouts: `HTTP_REQUEST_TIMEOUT` is enforced in PHP (`EnforceRequestTimeout` → `set_time_limit`); header-read and idle timeouts are web-server settings (`client_header_timeout`, `keepalive_timeout`), validated here and mapped in `deployments/`.
+- Timeouts: `HTTP_REQUEST_TIMEOUT` is enforced in PHP (`EnforceRequestTimeout` → `set_time_limit`) **and** as PHP-FPM's `request_terminate_timeout`. On Linux `set_time_limit` counts CPU time only, so time blocked on I/O is bounded by FPM's wall-clock limit. Header-read and idle timeouts are web-server settings (`client_header_timeout`, `keepalive_timeout`), validated here and mapped in `deployments/`.
 - Routing: `routes/api.php` is mounted under **`/api/v1`**. Modules register their own routes from their ServiceProvider with `Route::prefix('api/v1')->middleware('api')`.
 - Bootstrapping lives in `bootstrap/app.php` / `bootstrap/providers.php`; no business logic there.
 
@@ -116,6 +121,9 @@ Every error is `application/problem+json` with `type`, `title`, `status`,
 
 Exception messages and stack traces are logged, never returned — even with `APP_DEBUG=true`.
 
+This application serves only JSON APIs, so Problem Details are rendered for **every** route
+(including `/health/live`, `/metrics` and unknown paths), not only `/api/*`.
+
 ### Middleware (global, in order)
 1. `AssignRequestId` — accepts a valid `X-Request-ID` (1–128 chars of `A–Z a–z 0–9 . _ : -`), otherwise generates a UUIDv7; stored as a request attribute and in Laravel `Context` (so it is on every log line and propagates to queued jobs); echoed in the response.
 2. `RecordHttpMetrics` — request count and duration (terminable).
@@ -125,19 +133,19 @@ Exception messages and stack traces are logged, never returned — even with `AP
 
 ### Logging
 - Default channel `json` (`config/logging.php`): Monolog `StreamHandler` on stderr with `PlatformJsonFormatter` — one JSON object per line with `timestamp`, `level`, `service`, `environment`, `message`, `channel`, `request_id` (when in a request) and `context`.
-- `RedactSensitiveData` masks keys such as `password`, `token`, `authorization`, `cookie`, `api_key`, `app_key`, `secret`.
+- `RedactSensitiveData` masks values whose **key name** matches `password`, `token`, `authorization`, `cookie`, `api_key`, `app_key`, `secret`, `session`, … in context and extra data. Limits: it matches on key names only (broadly, so e.g. `token_count` is masked too) and does not scan log messages or exception text, so never interpolate secrets into messages.
 - Platform classes receive `Psr\Log\LoggerInterface` via constructor injection.
 
 ### Health and metrics
 - `GET /health/live` → `200 {"status":"ok"}`; no external dependencies.
-- `GET /metrics` (Prometheus text format) is served **only** on the `METRICS_ADDR` port (checked against the accepting `SERVER_PORT`, not the `Host` header); it returns 404 on the public listener.
+- `GET /metrics` (Prometheus text format) is served **only** on the `METRICS_ADDR` port (checked against the accepting `SERVER_PORT`, not the `Host` header); it returns 404 on the public listener. Any proxy in front of PHP must forward the real listener port as `SERVER_PORT` (our nginx template does), otherwise `/metrics` is 404 everywhere.
   - `http_requests_total{method,route,status}` and `http_request_duration_seconds{method,route}` (histogram). `route` is the route template or the fixed label `unmatched`; non-standard methods become `OTHER`.
   - PHP runtime gauges: `php_info`, `php_memory_usage_bytes`, `php_memory_peak_usage_bytes`, `php_opcache_*` (when OPcache is enabled; per process).
-- **Storage choice:** PHP shares no memory between requests, so samples are kept in a Laravel cache store (`METRICS_STORE`) and updated under a cache lock. `file` is fine locally; use `redis` in staging/production (APCu is not assumed to be installed). The exporter is a small in-repo implementation (`app/Platform/Observability/Metrics`) rather than an extra package.
+- **Storage choice:** PHP shares no memory between requests, so samples are kept in a Laravel cache store (`METRICS_STORE`). Every value (counter, histogram bucket, count, duration sum in µs) is its own key updated with the store's atomic increment, so requests never wait on a shared lock; a short lock is taken only the first time a series appears, to add it to the index. Keys are namespaced by `METRICS_INSTANCE` (default: hostname), so pods sharing one Redis each expose only their own samples and per-pod scrapes don't double count. Use `redis` in staging/production; `file` is not atomic across processes and is meant for local development (APCu is not assumed to be installed). The exporter is a small in-repo implementation (`app/Platform/Observability/Metrics`) behind a `MetricsStore` interface, so it can be swapped for `promphp/prometheus_client_php` later.
 
 ### Background worker and graceful shutdown
-- `php artisan platform:worker` runs `queue:work` (default connection `sync` for now) with `--timeout=SHUTDOWN_TIMEOUT`.
-- Laravel's worker handles `SIGTERM`/`SIGINT`/`SIGQUIT` via `pcntl`: it stops taking jobs, finishes the in-flight job and exits `0`. A job exceeding the deadline is killed and the worker exits non-zero, so shutdown cannot hang.
+- `php artisan platform:worker` runs `queue:work` (default connection `sync` for now) with `--timeout=QUEUE_JOB_TIMEOUT` (max runtime of a single job).
+- Laravel's worker handles `SIGTERM`/`SIGINT`/`SIGQUIT` via `pcntl`: it stops taking jobs, finishes the in-flight job and exits `0`. A job exceeding `QUEUE_JOB_TIMEOUT` is killed and the worker exits non-zero, so shutdown cannot hang. The process manager's grace period (`SHUTDOWN_TIMEOUT`, supervisor `stopwaitsecs`) is validated to be longer than the job timeout.
 - Lifecycle logs: `worker.started`, `worker.shutdown.started` (with signal), `worker.shutdown.completed` / `worker.shutdown.failed`, `worker.job.timed_out`.
 - HTTP: `artisan serve` forwards `SIGTERM`/`SIGINT` to its PHP server with a 10 s grace period; nginx (`SIGQUIT`, `worker_shutdown_timeout`) and PHP-FPM (`SIGQUIT`, `process_control_timeout`) drain in-flight requests — see [`deployments/README.md`](deployments/README.md).
 - Startup failures (invalid configuration, boot errors) are logged and artisan / worker exit non-zero.

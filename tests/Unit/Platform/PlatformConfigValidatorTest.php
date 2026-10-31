@@ -21,9 +21,11 @@ function platformConfig(array $overrides = []): Repository
         'platform.http.read_header_timeout' => 10,
         'platform.http.idle_timeout' => 60,
         'platform.shutdown_timeout' => 30,
+        'platform.queue.job_timeout' => 25,
         'platform.metrics.enabled' => true,
         'platform.metrics.addr' => '127.0.0.1:9100',
         'platform.metrics.store' => 'file',
+        'platform.metrics.instance' => null,
     ]);
 
     $config->set($overrides);
@@ -43,8 +45,8 @@ it('accepts the documented defaults', function () {
 it('ships defaults in config/platform.php for every non-secret value', function () {
     $defaults = (function () {
         $keys = ['APP_ENV', 'SERVICE_NAME', 'LOG_LEVEL', 'HTTP_ADDR', 'HTTP_REQUEST_TIMEOUT',
-            'HTTP_READ_HEADER_TIMEOUT', 'HTTP_IDLE_TIMEOUT', 'SHUTDOWN_TIMEOUT', 'METRICS_ENABLED',
-            'METRICS_ADDR', 'METRICS_STORE'];
+            'HTTP_READ_HEADER_TIMEOUT', 'HTTP_IDLE_TIMEOUT', 'SHUTDOWN_TIMEOUT', 'QUEUE_JOB_TIMEOUT',
+            'METRICS_ENABLED', 'METRICS_ADDR', 'METRICS_STORE', 'METRICS_INSTANCE'];
         $saved = [];
 
         foreach ($keys as $key) {
@@ -74,6 +76,7 @@ it('ships defaults in config/platform.php for every non-secret value', function 
         ->environment->toBe('production')
         ->log_level->toBe('info')
         ->shutdown_timeout->toBe(30)
+        ->and($defaults['queue'])->toBe(['job_timeout' => 25])
         ->and($defaults['http'])->toMatchArray([
             'addr' => '127.0.0.1:8000',
             'request_timeout' => 30,
@@ -84,6 +87,7 @@ it('ships defaults in config/platform.php for every non-secret value', function 
             'enabled' => true,
             'addr' => '127.0.0.1:9100',
             'store' => 'file',
+            'instance' => null,
         ]);
 });
 
@@ -97,8 +101,10 @@ it('accepts valid custom values', function () {
         'platform.http.read_header_timeout' => 5,
         'platform.http.idle_timeout' => 120,
         'platform.shutdown_timeout' => 45,
+        'platform.queue.job_timeout' => '40',
         'platform.metrics.addr' => '[::1]:9090',
         'platform.metrics.store' => 'redis',
+        'platform.metrics.instance' => 'api-7f9c-pod.1',
     ]))->toBe([]);
 });
 
@@ -129,6 +135,9 @@ it('rejects invalid values with actionable messages', function (string $key, mix
     'metrics address' => ['platform.metrics.addr', ':9100', 'METRICS_ADDR must be a "host:port" address, e.g. 127.0.0.1:9100.'],
     'same port' => ['platform.metrics.addr', '0.0.0.0:8000', 'METRICS_ADDR must use a different port than HTTP_ADDR so metrics stay off the public listener.'],
     'log level' => ['platform.log_level', 'verbose', 'LOG_LEVEL must be one of: debug, info, notice, warning, error, critical, alert, emergency.'],
+    'job timeout' => ['platform.queue.job_timeout', 0, 'QUEUE_JOB_TIMEOUT must be an integer number of seconds between 1 and 299.'],
+    'shutdown not above job timeout' => ['platform.shutdown_timeout', 25, 'SHUTDOWN_TIMEOUT must be greater than QUEUE_JOB_TIMEOUT so the worker can finish its in-flight job before it is killed.'],
+    'metrics instance' => ['platform.metrics.instance', 'pod/1', 'METRICS_INSTANCE may only contain letters, digits, ".", "_" and "-".'],
     'metrics store' => ['platform.metrics.store', 'memcached', 'METRICS_STORE must name a cache store configured in config/cache.php (array, file, redis).'],
 ]);
 

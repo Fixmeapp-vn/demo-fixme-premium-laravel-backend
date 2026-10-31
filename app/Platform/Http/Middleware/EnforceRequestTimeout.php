@@ -13,6 +13,9 @@ use Symfony\Component\HttpFoundation\Response;
 /**
  * Caps PHP execution time per request at HTTP_REQUEST_TIMEOUT seconds.
  *
+ * This is CPU time on Linux (see ExecutionTimeLimit); the wall-clock limit is
+ * PHP-FPM's request_terminate_timeout (deployments/php-fpm/www.conf).
+ *
  * When the limit is exceeded PHP raises a fatal "Maximum execution time"
  * error, which Laravel's HandleExceptions converts into a FatalError that is
  * reported and rendered as a 500 Problem Details response. The web server's

@@ -53,9 +53,11 @@ final class PlatformConfigValidator
             'HTTP_READ_HEADER_TIMEOUT' => $config->get('platform.http.read_header_timeout'),
             'HTTP_IDLE_TIMEOUT' => $config->get('platform.http.idle_timeout'),
             'SHUTDOWN_TIMEOUT' => $config->get('platform.shutdown_timeout'),
+            'QUEUE_JOB_TIMEOUT' => $config->get('platform.queue.job_timeout'),
             'METRICS_ENABLED' => $config->get('platform.metrics.enabled'),
             'METRICS_ADDR' => $config->get('platform.metrics.addr'),
             'METRICS_STORE' => $config->get('platform.metrics.store'),
+            'METRICS_INSTANCE' => $config->get('platform.metrics.instance'),
         ];
 
         /** @var array<string, mixed> $stores */
@@ -71,9 +73,11 @@ final class PlatformConfigValidator
             'HTTP_READ_HEADER_TIMEOUT' => ['required', 'integer', 'between:1,120'],
             'HTTP_IDLE_TIMEOUT' => ['required', 'integer', 'between:1,900'],
             'SHUTDOWN_TIMEOUT' => ['required', 'integer', 'between:1,300'],
+            'QUEUE_JOB_TIMEOUT' => ['required', 'integer', 'between:1,299'],
             'METRICS_ENABLED' => ['boolean'],
             'METRICS_ADDR' => ['required', 'string', 'regex:'.self::ADDRESS_PATTERN],
             'METRICS_STORE' => ['required', 'string', 'in:'.implode(',', array_keys($stores))],
+            'METRICS_INSTANCE' => ['nullable', 'string', 'max:64', 'regex:/^[A-Za-z0-9._-]+$/'],
         ];
 
         $messages = [
@@ -83,6 +87,7 @@ final class PlatformConfigValidator
             'SERVICE_NAME.regex' => 'SERVICE_NAME may only contain lowercase letters, digits, ".", "_" and "-".',
             'HTTP_ADDR.regex' => 'HTTP_ADDR must be a "host:port" address, e.g. 127.0.0.1:8000.',
             'METRICS_ADDR.regex' => 'METRICS_ADDR must be a "host:port" address, e.g. 127.0.0.1:9100.',
+            'METRICS_INSTANCE.regex' => 'METRICS_INSTANCE may only contain letters, digits, ".", "_" and "-".',
             'METRICS_STORE.in' => 'METRICS_STORE must name a cache store configured in config/cache.php ('.implode(', ', array_keys($stores)).').',
             'between' => ':attribute must be an integer number of seconds between :min and :max.',
             'integer' => ':attribute must be an integer number of seconds.',
@@ -103,6 +108,13 @@ final class PlatformConfigValidator
                 if ($port !== null && ($port < 1 || $port > 65535)) {
                     $validator->errors()->add($key, "{$key} port must be between 1 and 65535.");
                 }
+            }
+
+            $shutdown = $data['SHUTDOWN_TIMEOUT'];
+            $jobTimeout = $data['QUEUE_JOB_TIMEOUT'];
+
+            if (is_numeric($shutdown) && is_numeric($jobTimeout) && (int) $shutdown <= (int) $jobTimeout) {
+                $validator->errors()->add('SHUTDOWN_TIMEOUT', 'SHUTDOWN_TIMEOUT must be greater than QUEUE_JOB_TIMEOUT so the worker can finish its in-flight job before it is killed.');
             }
 
             $httpPort = self::portOf($data['HTTP_ADDR']);

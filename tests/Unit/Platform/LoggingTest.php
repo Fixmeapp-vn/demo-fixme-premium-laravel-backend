@@ -1,8 +1,12 @@
 <?php
 
+use App\Platform\Logging\ConfigurePlatformLogging;
 use App\Platform\Logging\PlatformJsonFormatter;
 use App\Platform\Logging\RedactSensitiveData;
+use Illuminate\Log\Logger;
+use Monolog\Handler\StreamHandler;
 use Monolog\Level;
+use Monolog\Logger as Monolog;
 use Monolog\LogRecord;
 
 function logRecord(array $context = [], array $extra = [], Level $level = Level::Info): LogRecord
@@ -78,9 +82,30 @@ it('redacts sensitive keys anywhere in context and extra', function () {
     ]);
 });
 
-it('configures the default channel as JSON with the configured level', function () {
+it('applies the validated platform settings to the json channel', function () {
+    config([
+        'platform.log_level' => 'warning',
+        'platform.service_name' => 'svc-from-platform',
+        'platform.environment' => 'staging',
+    ]);
+
+    $logger = new Logger(new Monolog('json', [new StreamHandler('php://memory')]));
+
+    app(ConfigurePlatformLogging::class)($logger);
+
+    $handler = $logger->getLogger()->getHandlers()[0];
+    $line = $handler->getFormatter()->format(logRecord());
+
+    expect($handler->getLevel())->toBe(Level::Warning)
+        ->and($handler->getFormatter())->toBeInstanceOf(PlatformJsonFormatter::class)
+        ->and(json_decode($line, true))
+        ->service->toBe('svc-from-platform')
+        ->environment->toBe('staging');
+});
+
+it('reads log settings from config/platform.php only', function () {
     expect(config('logging.channels.json'))
-        ->formatter->toBe(PlatformJsonFormatter::class)
+        ->tap->toBe([ConfigurePlatformLogging::class])
         ->processors->toBe([RedactSensitiveData::class])
-        ->level->toBe(env('LOG_LEVEL'));
+        ->not->toHaveKeys(['level', 'formatter_with']);
 });

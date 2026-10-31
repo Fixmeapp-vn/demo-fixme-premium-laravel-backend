@@ -6,13 +6,14 @@ use App\Platform\Observability\Metrics\PrometheusRenderer;
 use App\Platform\Observability\Metrics\RuntimeMetrics;
 use Illuminate\Cache\ArrayStore;
 use Illuminate\Cache\Repository;
+use Tests\Support\CountingArrayStore;
 
 function metricsRenderer(): array
 {
     $store = new CacheMetricsStore(new Repository(new ArrayStore));
     $http = new HttpMetrics($store, [0.1, 0.5, 1]);
 
-    return [$http, new PrometheusRenderer($store, new RuntimeMetrics, $http)];
+    return [$http, new PrometheusRenderer($store, new RuntimeMetrics)];
 }
 
 it('counts requests per method, route template and status', function () {
@@ -73,13 +74,71 @@ it('exposes PHP runtime gauges', function () {
         ->toContain('php_opcache_enabled ');
 });
 
-it('persists samples in the configured cache store across instances', function () {
+it('persists samples in the configured cache store across requests', function () {
     $cache = new Repository(new ArrayStore);
 
-    (new HttpMetrics(new CacheMetricsStore($cache), [1]))->record('GET', '/x', 200, 0.1);
-    (new HttpMetrics(new CacheMetricsStore($cache), [1]))->record('GET', '/x', 200, 0.1);
+    (new HttpMetrics(new CacheMetricsStore($cache, 'pod-a'), [1]))->record('GET', '/x', 200, 0.1);
+    (new HttpMetrics(new CacheMetricsStore($cache, 'pod-a'), [1]))->record('GET', '/x', 200, 0.1);
 
-    $snapshot = (new CacheMetricsStore($cache))->snapshot();
+    $snapshot = (new CacheMetricsStore($cache, 'pod-a'))->snapshot();
 
-    expect(array_values($snapshot['counters']['http_requests_total'])[0]['value'])->toEqual(2);
+    expect($snapshot['counters']['http_requests_total'][0]['value'])->toBe(2)
+        ->and($snapshot['histograms']['http_request_duration_seconds'][0])
+        ->count->toBe(2)
+        ->sum->toEqual(0.2)
+        ->buckets->toBe(['1' => 2]);
+});
+
+it('keeps instances sharing one store separate so per-instance scrapes never double count', function () {
+    $cache = new Repository(new ArrayStore);
+
+    (new HttpMetrics(new CacheMetricsStore($cache, 'pod-a'), [1]))->record('GET', '/x', 200, 0.1);
+    (new HttpMetrics(new CacheMetricsStore($cache, 'pod-b'), [1]))->record('GET', '/x', 200, 0.1);
+    (new HttpMetrics(new CacheMetricsStore($cache, 'pod-b'), [1]))->record('GET', '/x', 200, 0.1);
+
+    expect((new CacheMetricsStore($cache, 'pod-a'))->snapshot()['counters']['http_requests_total'][0]['value'])->toBe(1)
+        ->and((new CacheMetricsStore($cache, 'pod-b'))->snapshot()['counters']['http_requests_total'][0]['value'])->toBe(2);
+});
+
+it('updates each value with an atomic increment instead of rewriting a shared blob', function () {
+    $backend = new CountingArrayStore;
+    $store = new CacheMetricsStore(new Repository($backend), 'pod-a');
+
+    $store->incrementCounter('c', ['a' => '1']);
+    $store->incrementCounter('c', ['a' => '1']);
+    $store->incrementCounter('c', ['a' => '1']);
+
+    // Only the first observation of a series writes the index; later ones only increment.
+    expect($backend->writes)->toBe(1)
+        ->and($backend->increments)->toBe(3);
+});
+
+it('still records the sample when the index lock is busy, and retries the registration', function () {
+    $cache = new Repository(new ArrayStore);
+    $lock = $cache->getStore()->lock('platform:metrics:v2:pod-a:index:lock', 10);
+    $lock->get();
+
+    $store = new CacheMetricsStore($cache, 'pod-a');
+    $store->incrementCounter('c', []);
+
+    expect($store->snapshot()['counters'])->toBe([]);
+
+    $lock->release();
+    $store->incrementCounter('c', []);
+
+    expect($store->snapshot()['counters']['c'][0]['value'])->toBe(2);
+});
+
+it('flushes all samples of the instance', function () {
+    $store = new CacheMetricsStore(new Repository(new ArrayStore), 'pod-a');
+    $http = new HttpMetrics($store, [1]);
+
+    $http->record('GET', '/x', 200, 0.1);
+    $store->flush();
+
+    expect($store->snapshot())->toBe(['counters' => [], 'histograms' => []]);
+
+    $http->record('GET', '/x', 200, 0.1);
+
+    expect($store->snapshot()['counters']['http_requests_total'][0]['value'])->toBe(1);
 });

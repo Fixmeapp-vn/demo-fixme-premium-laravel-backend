@@ -9,12 +9,14 @@ use Illuminate\Contracts\Config\Repository as Config;
 use Symfony\Component\Console\Attribute\AsCommand;
 
 /**
- * Background worker entry point: `php artisan queue:work` with the shutdown
- * deadline taken from SHUTDOWN_TIMEOUT.
+ * Background worker entry point: `php artisan queue:work` with the per-job
+ * timeout taken from QUEUE_JOB_TIMEOUT.
  *
  * On SIGINT/SIGTERM Laravel's worker (pcntl) stops taking new jobs, lets the
- * in-flight job finish and exits 0. A job running longer than the deadline is
- * killed and the worker exits non-zero, so shutdown can never hang forever.
+ * in-flight job finish and exits 0. A job running longer than QUEUE_JOB_TIMEOUT
+ * is killed and the worker exits non-zero, so shutdown can never hang. The
+ * process manager's grace period (SHUTDOWN_TIMEOUT, e.g. supervisor
+ * `stopwaitsecs`) is validated to be longer than the job timeout.
  */
 #[AsCommand(name: 'platform:worker')]
 final class WorkerCommand extends Command
@@ -28,7 +30,7 @@ final class WorkerCommand extends Command
         {--max-time=0 : Stop after running for this many seconds}
         {--stop-when-empty : Stop when the queue is empty}';
 
-    protected $description = 'Run the queue worker with the platform shutdown deadline';
+    protected $description = 'Run the queue worker with the platform job timeout and lifecycle logging';
 
     public function handle(Config $config): int
     {
@@ -36,7 +38,7 @@ final class WorkerCommand extends Command
             $this->components->warn('ext-pcntl is not loaded: SIGTERM/SIGINT will not trigger a graceful shutdown.');
         }
 
-        $timeout = $config->get('platform.shutdown_timeout', 30);
+        $timeout = $config->get('platform.queue.job_timeout', 25);
 
         $arguments = array_filter([
             'connection' => $this->argument('connection'),
@@ -46,7 +48,7 @@ final class WorkerCommand extends Command
             '--max-jobs' => $this->option('max-jobs'),
             '--max-time' => $this->option('max-time'),
             '--stop-when-empty' => $this->option('stop-when-empty'),
-            '--timeout' => is_numeric($timeout) ? (int) $timeout : 30,
+            '--timeout' => is_numeric($timeout) ? (int) $timeout : 25,
         ], static fn (mixed $value): bool => $value !== null && $value !== false);
 
         return $this->call('queue:work', $arguments);

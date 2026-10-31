@@ -18,6 +18,10 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
  * the connection on (set by `php -S` / nginx `$server_port`), not the
  * client-controlled Host header. Anywhere else the route behaves as if it did
  * not exist (404 Problem Details), and when metrics are disabled as well.
+ *
+ * Any proxy or server in front of PHP must forward the real listener port as
+ * SERVER_PORT (our nginx template does: `fastcgi_param SERVER_PORT $server_port`).
+ * If it does not, /metrics answers 404 everywhere: this fails closed.
  */
 final class RestrictToMetricsListener
 {
