@@ -1,0 +1,44 @@
+# Rendered with: envsubst '${HTTP_PORT} ${METRICS_PORT} ${HTTP_READ_HEADER_TIMEOUT} ${HTTP_IDLE_TIMEOUT} ${HTTP_UPSTREAM_TIMEOUT}'
+# HTTP_UPSTREAM_TIMEOUT should be HTTP_REQUEST_TIMEOUT + 5 so PHP, not nginx, ends slow requests.
+# Set `worker_shutdown_timeout ${SHUTDOWN_TIMEOUT}s;` in the main nginx.conf.
+
+# Public API listener.
+server {
+    listen ${HTTP_PORT};
+    root /var/www/html/public;
+    index index.php;
+
+    client_header_timeout ${HTTP_READ_HEADER_TIMEOUT}s;
+    client_body_timeout   ${HTTP_READ_HEADER_TIMEOUT}s;
+    keepalive_timeout     ${HTTP_IDLE_TIMEOUT}s;
+
+    location = /metrics { return 404; }
+
+    location / {
+        try_files $uri /index.php?$query_string;
+    }
+
+    location ~ \.php$ {
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME $realpath_root$fastcgi_script_name;
+        fastcgi_param SERVER_PORT $server_port;
+        fastcgi_read_timeout ${HTTP_UPSTREAM_TIMEOUT}s;
+        fastcgi_pass 127.0.0.1:9000;
+    }
+}
+
+# Internal metrics listener (METRICS_ADDR). Do not expose outside the cluster network.
+server {
+    listen ${METRICS_PORT};
+    root /var/www/html/public;
+
+    location = /metrics {
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME $realpath_root/index.php;
+        fastcgi_param SERVER_PORT $server_port;
+        fastcgi_read_timeout 10s;
+        fastcgi_pass 127.0.0.1:9000;
+    }
+
+    location / { return 404; }
+}
