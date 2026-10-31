@@ -33,6 +33,13 @@ jobs:
           name: composer-lock
           path: composer.lock
 
+      # Same as `make setup`: Larastan boots the app, and with no .env APP_ENV defaults to
+      # production, where config validation (correctly) requires APP_KEY.
+      - name: Prepare environment
+        run: |
+          cp .env.example .env
+          php artisan key:generate --ansi
+
       - name: Formatting (Pint)
         run: vendor/bin/pint --test
 
