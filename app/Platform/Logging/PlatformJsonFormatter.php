@@ -26,10 +26,7 @@ final class PlatformJsonFormatter extends JsonFormatter
         private readonly string $environment = 'production',
         bool $includeStacktraces = true,
     ) {
-        parent::__construct(self::BATCH_MODE_NEWLINES, true, true);
-
-        // Set explicitly rather than via the positional constructor argument.
-        $this->includeStacktraces($includeStacktraces);
+        parent::__construct(self::BATCH_MODE_NEWLINES, true, true, $includeStacktraces);
     }
 
     public function format(LogRecord $record): string

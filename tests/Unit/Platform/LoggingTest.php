@@ -57,9 +57,9 @@ it('includes exception details for logs but stays valid JSON', function () {
     $decoded = json_decode($line, true, flags: JSON_THROW_ON_ERROR);
 
     expect($decoded['context']['exception'])
+        ->toHaveKey('trace')
         ->class->toBe(RuntimeException::class)
-        ->message->toBe('boom')
-        ->toHaveKey('trace');
+        ->message->toBe('boom');
 });
 
 it('redacts sensitive keys anywhere in context and extra', function () {
