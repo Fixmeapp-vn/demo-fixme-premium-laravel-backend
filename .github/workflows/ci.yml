@@ -48,3 +48,13 @@ jobs:
 
       - name: Tests (Pest, parallel)
         run: php artisan test --parallel
+
+      # TEMPORARY: the automation sandbox can't download artifacts, so print the resolved lock
+      # (gzip+base64) to the log so it can be committed. Removed together with the lock commit.
+      - name: Print resolved composer.lock
+        if: always()
+        run: |
+          sha256sum composer.lock
+          echo "-----BEGIN COMPOSER LOCK-----"
+          gzip -9c composer.lock | base64 -w 100
+          echo "-----END COMPOSER LOCK-----"
